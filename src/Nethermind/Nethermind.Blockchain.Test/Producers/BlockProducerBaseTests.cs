@@ -108,8 +108,8 @@ public partial class BlockProducerBaseTests
         // 30_000_000 * 8000 / 12000 = 20_000_000
         const long expectedGasLimit = 20_000_000;
 
-        OverridableReleaseSpec preForkSpec = new(Prague.Instance) { IsEip8198Enabled = false };
-        OverridableReleaseSpec postForkSpec = new(Prague.Instance) { IsEip8198Enabled = true, SlotDurationMs = Eip8198Constants.NewSlotDurationMs };
+        OverridableReleaseSpec preForkSpec = new(Osaka.Instance) { IsEip8198Enabled = false };
+        OverridableReleaseSpec postForkSpec = new(Osaka.Instance) { IsEip8198Enabled = true, SlotDurationMs = Eip8198Constants.NewSlotDurationMs };
         TestSpecProvider specProvider = new(preForkSpec)
         {
             NextForkSpec = postForkSpec,
