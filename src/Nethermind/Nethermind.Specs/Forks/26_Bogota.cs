@@ -14,6 +14,6 @@ public class Bogota() : NamedReleaseSpec<Bogota>(Amsterdam.Instance)
         spec.IsEip8198Enabled = true;
         spec.SlotDurationMs = Eip8198Constants.NewSlotDurationMs;
         spec.MaxBlobCount = spec.MaxBlobCount * Eip8198Constants.NewSlotDurationMs / Eip8198Constants.OldSlotDurationMs;
-        spec.TargetBlobCount = spec.MaxBlobCount * 2/3;
+        spec.TargetBlobCount = spec.MaxBlobCount * 2 / 3;
     }
 }
