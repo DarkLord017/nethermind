@@ -100,7 +100,7 @@ public readonly ref struct TransactionSubstate
             return;
 
         ReadOnlySpan<byte> span = Output.Span;
-        Error = TryGetErrorMessage(span) ?? EncodeErrorMessage(span);
+        Error = TryGetErrorMessage(span) ?? span.ToHexString(true);
     }
 
     public static string EncodeErrorMessage(ReadOnlySpan<byte> span) =>
