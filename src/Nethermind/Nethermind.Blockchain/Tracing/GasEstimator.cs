@@ -71,19 +71,35 @@ public class GasEstimator(
             : header.GasLimit;
         rightBound = Math.Min(rightBound, releaseSpec.GetTxGasLimitCap());
 
-        // Cap rightBound to what the sender can afford, matching Geth's allowance = balance / feeCap check.
-        // Without this, the binary search uses header.GasLimit as upper bound and the first TryExecutableTransaction
-        // call is rejected by TransactionProcessor before the EVM runs, producing an unhelpful error.
-        if (releaseSpec.IsEip1559Enabled && !tx.IsFree() && tx.MaxFeePerGas > UInt256.Zero)
+        // Cap rightBound to what the sender can afford (Geth parity: allowance = (balance - value) / gasPrice).
+        // With the shrunk gas limit the TransactionProcessor balance check passes, the EVM runs,
+        // and fails at intrinsic gas with OOG — producing "gas required exceeds allowance (N)".
+        if (!tx.IsFree() && tx.MaxFeePerGas > UInt256.Zero)
         {
-            long allowance = (long)UInt256.Min(senderBalance / tx.MaxFeePerGas, (UInt256)long.MaxValue);
-            if (allowance < lowerBound)
-            {
-                err = $"gas required exceeds allowance ({allowance})";
-                return 0;
-            }
+            UInt256 available = senderBalance;
+            if (tx.ValueRef > UInt256.Zero && available > tx.ValueRef)
+                available -= tx.ValueRef;
+
+            long allowance = (long)UInt256.Min(available / tx.MaxFeePerGas, (UInt256)long.MaxValue);
             rightBound = Math.Min(rightBound, allowance);
         }
+
+        // Execute at the highest allowable gas limit first (Geth parity).
+        // If it fails with OOG the sender cannot afford the tx even at maximum affordable gas.
+        // If it fails for any other reason (revert etc.) return that error immediately.
+        if (!TryExecutableTransaction(tx, header, rightBound, token, gasTracer, out TransactionResult? maxGasResult))
+        {
+            bool gasRelatedFailure = gasTracer.OutOfGas || maxGasResult is null;
+
+            err = gasRelatedFailure
+                ? $"gas required exceeds allowance ({rightBound})"
+                : GetError(gasTracer);
+
+            return 0;
+        }
+
+        // Keep the lower search bound aligned with the latest successful execution.
+        leftBound = Math.Max(leftBound, gasTracer.GasSpent - 1);
 
         if (leftBound > rightBound)
         {
@@ -92,7 +108,7 @@ public class GasEstimator(
         }
 
         // If transaction is simple transfer return intrinsic gas
-        if (tx.To is not null && tx.Data.IsEmpty && TryExecutableTransaction(tx, header, lowerBound, token, gasTracer)) return lowerBound;
+        if (tx.To is not null && tx.Data.IsEmpty && TryExecutableTransaction(tx, header, lowerBound, token, gasTracer, out _)) return lowerBound;
 
         // Execute binary search to find the optimal gas estimation.
         return BinarySearchEstimate(leftBound, rightBound, tx, header, gasTracer, errorMargin, token, out err);
@@ -109,13 +125,14 @@ public class GasEstimator(
         out string? err)
     {
         err = null;
+
         double marginWithDecimals = errorMargin == 0 ? 1 : errorMargin / 10000d + 1;
 
         //This approach is similar to Geth, by starting from an optimistic guess the number of iterations is greatly reduced in most cases
         long optimisticGasEstimate = (long)((gasTracer.GasSpent + gasTracer.TotalRefund + GasCostOf.CallStipend) * marginWithDecimals);
         if (optimisticGasEstimate > leftBound && optimisticGasEstimate < rightBound)
         {
-            if (TryExecutableTransaction(tx, header, optimisticGasEstimate, token, gasTracer))
+            if (TryExecutableTransaction(tx, header, optimisticGasEstimate, token, gasTracer, out _))
                 rightBound = optimisticGasEstimate;
             else
                 leftBound = optimisticGasEstimate;
@@ -127,7 +144,7 @@ public class GasEstimator(
                && leftBound + 1 < rightBound)
         {
             long mid = (leftBound + rightBound) / 2;
-            if (!TryExecutableTransaction(tx, header, mid, token, gasTracer))
+            if (!TryExecutableTransaction(tx, header, mid, token, gasTracer, out _))
             {
                 leftBound = mid;
             }
@@ -137,7 +154,7 @@ public class GasEstimator(
             }
         }
 
-        if (rightBound == cap && !TryExecutableTransaction(tx, header, rightBound, token, gasTracer))
+        if (rightBound == cap && !TryExecutableTransaction(tx, header, rightBound, token, gasTracer, out _))
         {
             err = GetError(gasTracer);
             return 0;
@@ -146,30 +163,38 @@ public class GasEstimator(
         return rightBound;
     }
 
-    private static string GetError(EstimateGasTracer gasTracer, string defaultError = "Transaction execution fails") =>
+    private static string? GetError(EstimateGasTracer gasTracer, string defaultError = "Transaction execution fails") =>
         gasTracer switch
         {
-            { TopLevelRevert: true } => gasTracer.Error ??
-                                        (gasTracer.ReturnValue?.Length > 0 ?
-                                            $"execution reverted: {gasTracer.ReturnValue.ToHexString(true)}"
-                                            : "execution reverted"),
+            { TopLevelRevert: true } => gasTracer.Error,
             { OutOfGas: true } => "Gas estimation failed due to out of gas",
             { StatusCode: StatusCode.Failure } => gasTracer.Error ?? "Transaction execution fails",
             _ => defaultError
         };
 
+    private static bool IsGasRelatedExecutionFailure(TransactionResult result) =>
+        result.Error is TransactionResult.ErrorType.GasLimitBelowIntrinsicGas
+            or TransactionResult.ErrorType.BlockGasLimitExceeded;
+
     private bool TryExecutableTransaction(Transaction transaction, BlockHeader block, long gasLimit,
-        CancellationToken token, EstimateGasTracer gasTracer)
+        CancellationToken token, EstimateGasTracer gasTracer, out TransactionResult? result)
     {
         Transaction txClone = new();
         transaction.CopyTo(txClone);
         txClone.GasLimit = gasLimit;
 
         transactionProcessor.SetBlockExecutionContext(new BlockExecutionContext(block, specProvider.GetSpec(block)));
-        TransactionResult result = transactionProcessor.CallAndRestore(txClone, gasTracer.WithCancellation(token));
+        TransactionResult callResult = transactionProcessor.CallAndRestore(txClone, gasTracer.WithCancellation(token));
 
-        // Transaction succeeds if it executed, has success status, no OutOfGas, and no top-level revert
-        return result.TransactionExecuted && gasTracer.StatusCode == StatusCode.Success &&
+        if (IsGasRelatedExecutionFailure(callResult))
+        {
+            result = null;
+            return false;
+        }
+
+        result = callResult;
+
+        return callResult.TransactionExecuted && gasTracer.StatusCode == StatusCode.Success &&
                !gasTracer.OutOfGas && !gasTracer.TopLevelRevert;
     }
 }
