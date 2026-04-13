@@ -71,6 +71,20 @@ public class GasEstimator(
             : header.GasLimit;
         rightBound = Math.Min(rightBound, releaseSpec.GetTxGasLimitCap());
 
+        // Cap rightBound to what the sender can afford, matching Geth's allowance = balance / feeCap check.
+        // Without this, the binary search uses header.GasLimit as upper bound and the first TryExecutableTransaction
+        // call is rejected by TransactionProcessor before the EVM runs, producing an unhelpful error.
+        if (releaseSpec.IsEip1559Enabled && !tx.IsFree() && tx.MaxFeePerGas > UInt256.Zero)
+        {
+            long allowance = (long)UInt256.Min(senderBalance / tx.MaxFeePerGas, (UInt256)long.MaxValue);
+            if (allowance < lowerBound)
+            {
+                err = $"gas required exceeds allowance ({allowance})";
+                return 0;
+            }
+            rightBound = Math.Min(rightBound, allowance);
+        }
+
         if (leftBound > rightBound)
         {
             err = "Cannot estimate gas, gas spent exceeded transaction and block gas limit or transaction gas limit cap";
