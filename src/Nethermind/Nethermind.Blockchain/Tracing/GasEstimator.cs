@@ -49,9 +49,10 @@ public class GasEstimator(
 
         UInt256 senderBalance = stateProvider.GetBalance(tx.SenderAddress);
         UInt256 available = senderBalance;
+
         if (!tx.IsSystem() && tx.ValueRef != UInt256.Zero)
         {
-            if (tx.ValueRef > available)
+            if (!tx.IsFree() && tx.MaxFeePerGas > UInt256.Zero && tx.ValueRef >= available)
             {
                 err = "insufficient funds for transfer";
                 return 0;
@@ -62,15 +63,18 @@ public class GasEstimator(
 
         long lowerBound = IntrinsicGasCalculator.Calculate(tx, releaseSpec).MinimalGas;
 
-        // Setting boundaries for binary search - determine lowest and highest gas can be used during the estimation:
         long leftBound = gasTracer.GasSpent != 0 && gasTracer.GasSpent >= lowerBound
             ? gasTracer.GasSpent - 1
             : lowerBound - 1;
-        long rightBound = tx.GasLimit != 0 && tx.GasLimit >= lowerBound
-            ? tx.GasLimit
-            : header.GasLimit;
-        rightBound = Math.Min(rightBound, releaseSpec.GetTxGasLimitCap());
-        rightBound = Math.Min(rightBound, header.GasLimit); // Geth parity: cap to block gas limit
+        long rightBound = header.GasLimit;
+        if (tx.GasLimit >= lowerBound)
+            rightBound = tx.GasLimit;
+        long txGasLimitCap = releaseSpec.GetTxGasLimitCap();
+        if (rightBound > txGasLimitCap)
+            rightBound = txGasLimitCap; 
+
+        // If transaction is simple transfer return intrinsic gas
+        if (tx.To is not null && tx.Data.IsEmpty && TryExecutableTransaction(tx, header, lowerBound, token, gasTracer, out _)) return lowerBound;
 
         // Cap rightBound to what the sender can afford (Geth parity: allowance = (balance - value) / gasPrice).
         // With the shrunk gas limit the TransactionProcessor balance check passes, the EVM runs,
@@ -103,10 +107,7 @@ public class GasEstimator(
             err = "Cannot estimate gas, gas spent exceeded transaction and block gas limit or transaction gas limit cap";
             return 0;
         }
-
-        // If transaction is simple transfer return intrinsic gas
-        if (tx.To is not null && tx.Data.IsEmpty && TryExecutableTransaction(tx, header, lowerBound, token, gasTracer, out _)) return lowerBound;
-
+        
         // Execute binary search to find the optimal gas estimation.
         return BinarySearchEstimate(leftBound, rightBound, tx, header, gasTracer, errorMargin, token, out err);
     }

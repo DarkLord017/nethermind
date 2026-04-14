@@ -410,7 +410,7 @@ public partial class EthRpcModuleTests
     public async Task Estimate_gas_uses_specified_gas_limit()
     {
         using Context ctx = await Context.Create();
-        await TestEstimateGasOutOfGas(ctx, 30000000, 30000000, $"gas required exceeds allowance ({4000000})");
+        await TestEstimateGasOutOfGas(ctx, 30000000, 30000000, $"gas required exceeds allowance ({30000000})");
     }
 
     [Test]
@@ -418,7 +418,7 @@ public partial class EthRpcModuleTests
     {
         using Context ctx = await Context.Create();
         ctx.Test.RpcConfig.GasCap = 50000000;
-        await TestEstimateGasOutOfGas(ctx, 300000000, 50000000, $"gas required exceeds allowance ({4000000})");
+        await TestEstimateGasOutOfGas(ctx, 300000000, 50000000, $"gas required exceeds allowance ({50000000})");
     }
 
     [Test]
