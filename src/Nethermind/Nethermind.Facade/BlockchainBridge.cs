@@ -191,7 +191,18 @@ namespace Nethermind.Facade
             long estimate = gasEstimator.Estimate(tx, header, estimateGasTracer, out string? err, errorMargin, cancellationToken);
             if (err is not null)
             {
-                error = err;
+                bool shouldOverrideExistingError = tryCallResult.Error is
+                    TransactionResult.ErrorType.InsufficientMaxFeePerGasForSenderBalance or
+                    TransactionResult.ErrorType.InsufficientSenderBalance;
+
+                if (shouldOverrideExistingError)
+                {
+                    error = err;
+                }
+                else
+                {
+                    error ??= err;
+                }
             }
 
             return new CallOutput
