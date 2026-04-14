@@ -47,17 +47,17 @@ public class GasEstimator(
 
         tx.SenderAddress ??= Address.Zero; // If sender is not specified, use zero address.
 
-        // Calculate and return additional gas required in case of insufficient funds.
         UInt256 senderBalance = stateProvider.GetBalance(tx.SenderAddress);
-        if (tx.ValueRef != UInt256.Zero && tx.ValueRef > senderBalance && !tx.IsSystem())
+        UInt256 available = senderBalance;
+        if (!tx.IsSystem() && tx.ValueRef != UInt256.Zero)
         {
-            long additionalGas = gasTracer.CalculateAdditionalGasRequired(tx, releaseSpec);
-            if (additionalGas == 0)
+            if (tx.ValueRef > available)
             {
-                // If no additional gas can help, it's an insufficient balance error
-                err = GetError(gasTracer, "insufficient balance");
+                err = "insufficient funds for transfer";
+                return 0;
             }
-            return additionalGas;
+
+            available -= tx.ValueRef;
         }
 
         long lowerBound = IntrinsicGasCalculator.Calculate(tx, releaseSpec).MinimalGas;
@@ -70,16 +70,13 @@ public class GasEstimator(
             ? tx.GasLimit
             : header.GasLimit;
         rightBound = Math.Min(rightBound, releaseSpec.GetTxGasLimitCap());
+        rightBound = Math.Min(rightBound, header.GasLimit); // Geth parity: cap to block gas limit
 
         // Cap rightBound to what the sender can afford (Geth parity: allowance = (balance - value) / gasPrice).
         // With the shrunk gas limit the TransactionProcessor balance check passes, the EVM runs,
         // and fails at intrinsic gas with OOG — producing "gas required exceeds allowance (N)".
         if (!tx.IsFree() && tx.MaxFeePerGas > UInt256.Zero)
         {
-            UInt256 available = senderBalance;
-            if (tx.ValueRef > UInt256.Zero && available > tx.ValueRef)
-                available -= tx.ValueRef;
-
             long allowance = (long)UInt256.Min(available / tx.MaxFeePerGas, (UInt256)long.MaxValue);
             rightBound = Math.Min(rightBound, allowance);
         }

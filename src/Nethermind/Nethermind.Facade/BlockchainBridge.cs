@@ -191,7 +191,7 @@ namespace Nethermind.Facade
             long estimate = gasEstimator.Estimate(tx, header, estimateGasTracer, out string? err, errorMargin, cancellationToken);
             if (err is not null)
             {
-                error ??= err;
+                error = err;
             }
 
             return new CallOutput
