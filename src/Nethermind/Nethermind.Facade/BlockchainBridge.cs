@@ -308,10 +308,7 @@ namespace Nethermind.Facade
             return components.TransactionProcessor.CallAndRestore(transaction, in blockExecutionContext, tracer);
         }
 
-        public ulong GetChainId()
-        {
-            return blockTree.ChainId;
-        }
+        public ulong GetChainId() => blockTree.ChainId;
 
         public bool FilterExists(int filterId) => filterStore.FilterExists(filterId);
         public FilterType GetFilterType(int filterId) => filterStore.GetFilterType(filterId);
@@ -331,19 +328,13 @@ namespace Nethermind.Facade
             BlockParameter fromBlock,
             BlockParameter toBlock,
             HashSet<AddressAsKey>? addresses = null,
-            IEnumerable<Hash256[]?>? topics = null)
-        {
-            return filterStore.CreateLogFilter(fromBlock, toBlock, addresses, topics, false);
-        }
+            IEnumerable<Hash256[]?>? topics = null) => filterStore.CreateLogFilter(fromBlock, toBlock, addresses, topics, false);
 
         public IEnumerable<FilterLog> GetLogs(
             LogFilter filter,
             BlockHeader fromBlock,
             BlockHeader toBlock,
-            CancellationToken cancellationToken = default)
-        {
-            return logFinder.FindLogs(filter, fromBlock, toBlock, cancellationToken);
-        }
+            CancellationToken cancellationToken = default) => logFinder.FindLogs(filter, fromBlock, toBlock, cancellationToken);
 
         public bool TryGetLogs(int filterId, out IEnumerable<FilterLog> filterLogs, CancellationToken cancellationToken = default)
         {
@@ -408,25 +399,13 @@ namespace Nethermind.Facade
 
         public Address? RecoverTxSender(Transaction tx) => ecdsa.RecoverAddress(tx);
 
-        public void RunTreeVisitor<TCtx>(ITreeVisitor<TCtx> treeVisitor, BlockHeader? baseBlock) where TCtx : struct, INodeContext<TCtx>
-        {
-            stateReader.RunTreeVisitor(treeVisitor, baseBlock);
-        }
+        public void RunTreeVisitor<TCtx>(ITreeVisitor<TCtx> treeVisitor, BlockHeader? baseBlock) where TCtx : struct, INodeContext<TCtx> => stateReader.RunTreeVisitor(treeVisitor, baseBlock);
 
-        public bool HasStateForBlock(BlockHeader? baseBlock)
-        {
-            return stateReader.HasStateForBlock(baseBlock);
-        }
+        public bool HasStateForBlock(BlockHeader? baseBlock) => stateReader.HasStateForBlock(baseBlock);
 
-        public IEnumerable<FilterLog> FindLogs(LogFilter filter, BlockHeader fromBlock, BlockHeader toBlock, CancellationToken cancellationToken = default)
-        {
-            return logFinder.FindLogs(filter, fromBlock, toBlock, cancellationToken);
-        }
+        public IEnumerable<FilterLog> FindLogs(LogFilter filter, BlockHeader fromBlock, BlockHeader toBlock, CancellationToken cancellationToken = default) => logFinder.FindLogs(filter, fromBlock, toBlock, cancellationToken);
 
-        public IEnumerable<FilterLog> FindLogs(LogFilter filter, CancellationToken cancellationToken = default)
-        {
-            return logFinder.FindLogs(filter, cancellationToken);
-        }
+        public IEnumerable<FilterLog> FindLogs(LogFilter filter, CancellationToken cancellationToken = default) => logFinder.FindLogs(filter, cancellationToken);
 
         public BlockAccessList? GetBlockAccessList(Hash256 blockHash)
             => balStore.Get(blockHash);
@@ -454,6 +433,13 @@ namespace Nethermind.Facade
             using IWitnessGeneratingBlockProcessingEnvScope scope = witnessGeneratingBlockProcessingEnvFactory.Value.CreateScope();
             IExistingBlockWitnessCollector witnessCollector = scope.Env.CreateExistingBlockWitnessCollector();
             return witnessCollector.GetWitnessForExistingBlock(parent, block);
+        }
+
+        public Witness GenerateExecutionWitness(BlockHeader header, Transaction tx)
+        {
+            using IWitnessGeneratingBlockProcessingEnvScope scope = witnessGeneratingBlockProcessingEnvFactory.Value.CreateScope();
+            ISingleCallWitnessCollector collector = scope.Env.CreateSingleCallWitnessCollector();
+            return collector.ExecuteCallAndCollectWitness(header, tx);
         }
 
         public record BlockProcessingComponents(
